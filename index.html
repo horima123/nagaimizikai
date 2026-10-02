@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ながさマッチング - 特別支援教材アプリ</title>
+    <!-- Tailwind CSS for responsive utility styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome icons for icon-only UI -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #e0f2fe;
+        }
+
+        /* Earth / Soil texture background */
+        .soil-bg {
+            background: linear-gradient(180deg, #4ade80 0%, #15803d 14px, #78350f 15px, #381504 100%);
+            box-shadow: inset 0 8px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Hole in the ground (vertical shaft dug into earth) */
+        .ground-hole {
+            background: #1a0a02;
+            box-shadow: inset 4px 6px 12px rgba(0, 0, 0, 0.9), 0 0 0 3px #2e1005;
+            border-radius: 12px 12px 16px 16px;
+            transition: background 0.2s ease, box-shadow 0.2s ease;
+            position: relative;
+        }
+
+        .ground-hole.drag-over {
+            background: #3b1a08;
+            box-shadow: inset 0 0 15px #f59e0b, 0 0 12px #fbbf24;
+            transform: scale(1.03);
+        }
+
+        /* Vertical Stick styling (Simple & Solid Color) */
+        .stick {
+            cursor: grab;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.2s ease;
+            touch-action: none;
+            box-shadow: 3px 5px 10px rgba(0,0,0,0.25);
+        }
+
+        .stick:active {
+            cursor: grabbing;
+        }
+
+        .stick.selected {
+            transform: scale(1.08) translateY(-10px);
+            box-shadow: 0 0 25px #f59e0b, 0 10px 20px rgba(0,0,0,0.3);
+            border-color: #f59e0b !important;
+        }
+
+        /* Embedded stick in hole insertion animation */
+        .stick-inserted {
+            animation: insertThud 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.25);
+        }
+
+        @keyframes insertThud {
+            0% { transform: translateY(-30px) scale(0.9); opacity: 0.5; }
+            70% { transform: translateY(4px) scale(1.02); }
+            100% { transform: translateY(0) scale(1.0); opacity: 1; }
+        }
+
+        /* Particle overlay canvas */
+        #confetti-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        @keyframes popIn {
+            0% { transform: scale(0.3) rotate(-10deg); opacity: 0; }
+            70% { transform: scale(1.1) rotate(5deg); opacity: 1; }
+            100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+
+        .animate-pop-in {
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.25) forwards;
+        }
+    </style>
+</head>
+<body class="min-h-screen text-slate-800 flex flex-col justify-between p-2 md:p-4 overflow-hidden">
+
+    <header class="max-w-4xl w-full mx-auto bg-white/90 backdrop-blur-md rounded-3xl p-3 md:p-4 shadow-lg border-2 border-sky-200 z-20">
+        <div class="flex items-center justify-between gap-2">
+            
+            <!-- Audio Sound Toggle Button -->
+            <div class="flex items-center gap-2">
+                <button id="btn-sound" onclick="toggleSound()" class="w-12 h-12 md:w-14 md:h-14 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white rounded-2xl flex items-center justify-center text-2xl shadow-md transition">
+                    <i id="sound-icon" class="fa-solid fa-volume-high"></i>
+                </button>
+            </div>
+
+            <!-- Progress Meter (10 Stamp slots) -->
+            <div id="stamp-container" class="flex-1 max-w-md mx-2 flex justify-between items-center bg-sky-50 p-2 rounded-2xl border border-sky-200 overflow-x-auto gap-1">
+                <!-- JS dynamically renders 10 stamp items -->
+            </div>
+
+            <!-- Return to Start Screen Button -->
+            <button onclick="showStartScreen()" class="w-12 h-12 md:w-14 md:h-14 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-2xl flex items-center justify-center text-2xl shadow-md transition">
+                <i class="fa-solid fa-house"></i>
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-4xl w-full mx-auto flex-1 flex flex-col justify-between my-3 gap-0 relative rounded-3xl overflow-hidden shadow-2xl border-4 border-emerald-600">
+        
+        <!-- Sky Area: Standing Sticks -->
+        <section id="sky-area" class="flex-1 bg-gradient-to-b from-sky-200 via-sky-100 to-emerald-100 p-4 flex flex-col justify-end items-center relative min-h-[160px]">
+            <!-- Decorative background clouds -->
+            <div class="absolute top-3 left-6 text-white/80 text-4xl pointer-events-none"><i class="fa-solid fa-cloud"></i></div>
+            <div class="absolute top-6 right-10 text-white/70 text-5xl pointer-events-none"><i class="fa-solid fa-cloud"></i></div>
+
+            <!-- Container for selectable vertical sticks -->
+            <div id="sticks-container" class="w-full flex justify-around items-end h-full pt-4 z-10 px-4">
+                <!-- JS dynamically renders sticks -->
+            </div>
+        </section>
+
+        <!-- Soil / Earth Ground Area: Extended height so deep holes are 100% visible -->
+        <section id="soil-area" class="soil-bg h-[300px] md:h-[340px] p-3 md:p-4 flex flex-col justify-start relative">
+            <!-- Ground Holes Container -->
+            <div class="w-full flex justify-around items-start h-full pt-2 px-4" id="slots-container">
+                <!-- JS dynamically renders vertical dirt holes -->
+            </div>
+        </section>
+
+    </main>
+
+    <!-- "たいへんよくできました" Question Clear Overlay -->
+    <div id="question-clear-overlay" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-40 hidden pointer-events-none transition-all">
+        <div class="bg-white/95 border-8 border-red-500 rounded-full p-8 md:p-12 flex flex-col items-center justify-center shadow-2xl animate-pop-in text-center max-w-xs md:max-w-md mx-4">
+            <div class="text-7xl md:text-9xl mb-2 text-red-500 animate-bounce">💮</div>
+            <div class="text-2xl md:text-4xl font-black text-red-600 tracking-wider whitespace-nowrap">たいへんよくできました</div>
+        </div>
+    </div>
+
+    <!-- Final Game Clear Trophy Modal -->
+    <div id="clear-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 hidden p-4">
+        <div class="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border-8 border-yellow-400">
+            <div class="text-7xl mb-4 animate-bounce">💮</div>
+            <div class="text-5xl mb-6">🏆 ⭐ ⭐ ⭐</div>
+
+            <button onclick="showStartScreen()" class="w-24 h-24 bg-yellow-400 hover:bg-yellow-500 text-amber-950 font-black text-4xl rounded-full shadow-lg border-b-8 border-yellow-600 active:translate-y-1 transition mx-auto flex items-center justify-center">
+                <i class="fa-solid fa-house"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Start / Difficulty Mode Selection Screen Overlay -->
+    <div id="start-screen" class="fixed inset-0 bg-gradient-to-b from-sky-300 via-sky-200 to-emerald-200 z-50 flex flex-col items-center justify-center p-4">
+        <div class="bg-white/95 backdrop-blur-md p-6 md:p-8 rounded-3xl shadow-2xl border-4 border-sky-300 text-center max-w-sm md:max-w-md w-full flex flex-col items-center gap-6 animate-pop-in">
+            
+            <!-- Graphic Illustration Preview -->
+            <div class="flex justify-center items-end gap-3 my-2 h-28 px-4 py-2 bg-sky-50 rounded-2xl border border-sky-200 w-full">
+                <div class="w-7 h-24 bg-red-500 rounded-full border-2 border-red-600 shadow-sm"></div>
+                <div class="w-7 h-16 bg-blue-500 rounded-full border-2 border-blue-600 shadow-sm"></div>
+                <div class="w-7 h-10 bg-emerald-500 rounded-full border-2 border-emerald-600 shadow-sm"></div>
+            </div>
+
+            <!-- Big Visual Mode Selection Buttons (2, 3, 4 choices) -->
+            <div class="w-full flex flex-col gap-4">
+                <button onclick="startGame(2)" class="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black text-3xl py-4 rounded-2xl shadow-lg border-b-4 border-emerald-700 flex items-center justify-between px-8 transition">
+                    <span class="text-4xl">2</span>
+                    <div class="flex items-end gap-2 h-10">
+                        <div class="w-4 h-10 bg-white rounded-full"></div>
+                        <div class="w-4 h-6 bg-white rounded-full"></div>
+                    </div>
+                </button>
+
+                <button onclick="startGame(3)" class="w-full bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-black text-3xl py-4 rounded-2xl shadow-lg border-b-4 border-amber-700 flex items-center justify-between px-8 transition">
+                    <span class="text-4xl">3</span>
+                    <div class="flex items-end gap-1.5 h-10">
+                        <div class="w-3.5 h-10 bg-white rounded-full"></div>
+                        <div class="w-3.5 h-7.5 bg-white rounded-full"></div>
+                        <div class="w-3.5 h-5 bg-white rounded-full"></div>
+                    </div>
+                </button>
+
+                <button onclick="startGame(4)" class="w-full bg-purple-500 hover:bg-purple-600 active:scale-95 text-white font-black text-3xl py-4 rounded-2xl shadow-lg border-b-4 border-purple-700 flex items-center justify-between px-8 transition">
+                    <span class="text-4xl">4</span>
+                    <div class="flex items-end gap-1.5 h-10">
+                        <div class="w-3 h-10 bg-white rounded-full"></div>
+                        <div class="w-3 h-8 bg-white rounded-full"></div>
+                        <div class="w-3 h-6 bg-white rounded-full"></div>
+                        <div class="w-3 h-4 bg-white rounded-full"></div>
+                    </div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Celebration Confetti Canvas -->
+    <canvas id="confetti-canvas"></canvas>
+
+    <script>
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx = null;
+        let soundEnabled = true;
+        let japaneseVoice = null;
+
+        // Initialize Web Speech API Voices for Japanese Speech
+        function initVoices() {
+            if ('speechSynthesis' in window) {
+                const voices = window.speechSynthesis.getVoices();
+                japaneseVoice = voices.find(v => v.lang === 'ja-JP' || v.lang.startsWith('ja')) || null;
+            }
+        }
+
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.onvoiceschanged = initVoices;
+            initVoices();
+        }
+
+        function getAudioContext() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            return audioCtx;
+        }
+
+        // Activate Audio Context & Warm Up Web Speech API on user touch (iOS/Safari fix)
+        function activateAudio() {
+            getAudioContext();
+            if ('speechSynthesis' in window) {
+                if (window.speechSynthesis.suspended) {
+                    window.speechSynthesis.resume();
+                }
+                const dummy = new SpeechSynthesisUtterance('');
+                dummy.volume = 0;
+                window.speechSynthesis.speak(dummy);
+            }
+        }
+
+        function playSound(type) {
+            if (!soundEnabled) return;
+            try {
+                const ctx = getAudioContext();
+                const now = ctx.currentTime;
+
+                if (type === 'tap') {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(440, now);
+                    osc.frequency.exponentialRampToValueAtTime(880, now + 0.05);
+                    gain.gain.setValueAtTime(0.15, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.05);
+                } else if (type === 'thud') {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.exponentialRampToValueAtTime(40, now + 0.15);
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.15);
+                } else if (type === 'error') {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(180, now);
+                    osc.frequency.setValueAtTime(140, now + 0.1);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                } else if (type === 'correct') {
+                    [523.25, 659.25, 783.99].forEach((freq, idx) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+                        gain.gain.setValueAtTime(0.2, now + idx * 0.08);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.3);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(now + idx * 0.08);
+                        osc.stop(now + idx * 0.08 + 0.3);
+                    });
+                } else if (type === 'fanfare') {
+                    const notes = [523.25, 659.25, 783.99, 1046.50];
+                    notes.forEach((freq, idx) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = 'triangle';
+                        const startTime = now + idx * 0.12;
+                        const duration = idx === notes.length - 1 ? 0.6 : 0.15;
+                        osc.frequency.setValueAtTime(freq, startTime);
+                        gain.gain.setValueAtTime(0.3, startTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(startTime);
+                        osc.stop(startTime + duration);
+                    });
+                }
+            } catch (e) {
+                console.error("Audio playback error:", e);
+            }
+        }
+
+        function speakText(text) {
+            if (!soundEnabled) return;
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                
+                setTimeout(() => {
+                    const utter = new SpeechSynthesisUtterance(text);
+                    utter.lang = 'ja-JP';
+                    if (japaneseVoice) utter.voice = japaneseVoice;
+                    utter.rate = 0.85;
+                    utter.pitch = 1.1;
+                    utter.volume = 1.0;
+                    window.speechSynthesis.speak(utter);
+                }, 50);
+            }
+        }
+
+        let currentQuestion = 1;
+        const totalQuestions = 10;
+        let difficulty = 2; // Default 2 choices
+        let selectedStickId = null;
+        let activeSticks = [];
+        let matchedCount = 0;
+        let isAnimating = false; // Prevents multi-touch glitches during wrong placement feedback
+
+        // Vibrant solid colors for plain sticks
+        const stickColors = [
+            { bg: 'bg-red-500', border: 'border-red-600' },
+            { bg: 'bg-blue-500', border: 'border-blue-600' },
+            { bg: 'bg-emerald-500', border: 'border-emerald-600' },
+            { bg: 'bg-amber-500', border: 'border-amber-600' },
+            { bg: 'bg-purple-500', border: 'border-purple-600' },
+            { bg: 'bg-pink-500', border: 'border-pink-600' },
+            { bg: 'bg-orange-500', border: 'border-orange-600' },
+            { bg: 'bg-cyan-500', border: 'border-cyan-600' },
+            { bg: 'bg-lime-500', border: 'border-lime-600' },
+            { bg: 'bg-indigo-500', border: 'border-indigo-600' }
+        ];
+
+        window.onload = () => {
+            showStartScreen();
+        };
+
+        function showStartScreen() {
+            document.getElementById('start-screen').classList.remove('hidden');
+            document.getElementById('clear-modal').classList.add('hidden');
+            stopConfetti();
+        }
+
+        function startGame(num) {
+            activateAudio();
+            difficulty = num;
+            currentQuestion = 1;
+            document.getElementById('start-screen').classList.add('hidden');
+            renderStamps();
+            loadQuestion();
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            const soundIcon = document.getElementById('sound-icon');
+            const btn = document.getElementById('btn-sound');
+
+            if (soundEnabled) {
+                soundIcon.className = 'fa-solid fa-volume-high';
+                btn.className = 'w-12 h-12 md:w-14 md:h-14 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white rounded-2xl flex items-center justify-center text-2xl shadow-md transition';
+            } else {
+                soundIcon.className = 'fa-solid fa-volume-xmark';
+                btn.className = 'w-12 h-12 md:w-14 md:h-14 bg-slate-400 hover:bg-slate-500 active:scale-95 text-white rounded-2xl flex items-center justify-center text-2xl shadow-md transition';
+                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+            }
+        }
+
+        function renderStamps() {
+            const container = document.getElementById('stamp-container');
+            container.innerHTML = '';
+
+            for (let i = 1; i <= totalQuestions; i++) {
+                const stamp = document.createElement('div');
+                stamp.id = `stamp-${i}`;
+                stamp.className = 'w-7 h-7 md:w-9 md:h-9 rounded-full border-2 border-sky-300 bg-white flex items-center justify-center font-bold text-sky-300 text-xs md:text-sm transition-all duration-300';
+                stamp.innerText = i;
+                container.appendChild(stamp);
+            }
+            updateStampUI();
+        }
+
+        function updateStampUI() {
+            for (let i = 1; i <= totalQuestions; i++) {
+                const stamp = document.getElementById(`stamp-${i}`);
+                if (!stamp) continue;
+
+                if (i < currentQuestion) {
+                    stamp.className = 'w-7 h-7 md:w-9 md:h-9 rounded-full border-2 border-yellow-500 bg-yellow-400 text-amber-950 flex items-center justify-center font-black text-base shadow-sm scale-105';
+                    stamp.innerText = '💮';
+                } else if (i === currentQuestion) {
+                    stamp.className = 'w-7 h-7 md:w-9 md:h-9 rounded-full border-4 border-amber-500 bg-amber-200 text-amber-900 flex items-center justify-center font-black text-xs md:text-sm scale-110 shadow-md animate-pulse';
+                    stamp.innerText = i;
+                } else {
+                    stamp.className = 'w-7 h-7 md:w-9 md:h-9 rounded-full border-2 border-sky-200 bg-white/70 text-sky-300 flex items-center justify-center font-bold text-xs';
+                    stamp.innerText = i;
+                }
+            }
+        }
+
+        function loadQuestion() {
+            matchedCount = 0;
+            selectedStickId = null;
+            isAnimating = false;
+
+            // Define vertical heights (in px) for dug holes and sticks
+            let baseConfigs = [];
+            if (difficulty === 2) {
+                baseConfigs = [
+                    { height: 160, voice: 'ながーい' },
+                    { height: 70, voice: 'みじかーい' }
+                ];
+            } else if (difficulty === 3) {
+                baseConfigs = [
+                    { height: 165, voice: 'ながーい' },
+                    { height: 115, voice: 'ちゅうぐらい' },
+                    { height: 65, voice: 'みじかーい' }
+                ];
+            } else {
+                baseConfigs = [
+                    { height: 170, voice: 'いちばん ながーい' },
+                    { height: 130, voice: 'ながーい' },
+                    { height: 90, voice: 'ちゅうぐらい' },
+                    { height: 55, voice: 'みじかーい' }
+                ];
+            }
+
+            // Shuffle color palette so stick colors are completely random per question
+            const shuffledColors = [...stickColors].sort(() => Math.random() - 0.5);
+
+            // Create active stick objects with random colors
+            activeSticks = baseConfigs.map((item, index) => ({
+                id: `stick-${index}`,
+                height: item.height,
+                voice: item.voice,
+                color: shuffledColors[index],
+                isMatched: false
+            }));
+
+            // Shuffle sticks and ground holes independently
+            const shuffledSticks = [...activeSticks].sort(() => Math.random() - 0.5);
+            const shuffledSlots = [...activeSticks].sort(() => Math.random() - 0.5);
+
+            renderSticksUI(shuffledSticks);
+            renderSlotsUI(shuffledSlots);
+            updateStampUI();
+        }
+
+        function renderSticksUI(sticks) {
+            const container = document.getElementById('sticks-container');
+            container.innerHTML = '';
+
+            sticks.forEach(stick => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'flex flex-col items-center justify-end h-full px-2';
+
+                const el = document.createElement('div');
+                el.id = stick.id;
+                el.draggable = true;
+                el.className = `stick w-10 md:w-14 rounded-2xl ${stick.color.bg} border-4 ${stick.color.border} flex flex-col justify-between items-center py-2 text-white select-none relative`;
+                el.style.height = `${stick.height}px`;
+                el.innerHTML = ``;
+
+                // Desktop Mouse Drag
+                el.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('text/plain', stick.id);
+                    selectStick(stick.id);
+                });
+
+                // Tap selection
+                el.addEventListener('click', () => {
+                    selectStick(stick.id);
+                });
+
+                // Touch Drag & Drop (iPad / Tablet Touch Drag)
+                setupTouchDrag(el, stick);
+
+                wrapper.appendChild(el);
+                container.appendChild(wrapper);
+            });
+        }
+
+        let activeDragGhost = null;
+
+        function setupTouchDrag(el, stick) {
+            el.addEventListener('touchstart', (e) => {
+                if (isAnimating || stick.isMatched) return;
+                const touch = e.touches[0];
+                selectStick(stick.id);
+
+                // Create floating ghost element following finger
+                activeDragGhost = el.cloneNode(true);
+                activeDragGhost.id = 'drag-ghost';
+                activeDragGhost.style.position = 'fixed';
+                activeDragGhost.style.pointerEvents = 'none';
+                activeDragGhost.style.zIndex = '1000';
+                activeDragGhost.style.opacity = '0.85';
+                activeDragGhost.style.transform = 'scale(1.08)';
+                activeDragGhost.style.left = `${touch.clientX - 25}px`;
+                activeDragGhost.style.top = `${touch.clientY - stick.height / 2}px`;
+
+                document.body.appendChild(activeDragGhost);
+                el.style.opacity = '0.2';
+            }, { passive: true });
+
+            el.addEventListener('touchmove', (e) => {
+                if (!activeDragGhost) return;
+                const touch = e.touches[0];
+                activeDragGhost.style.left = `${touch.clientX - 25}px`;
+                activeDragGhost.style.top = `${touch.clientY - stick.height / 2}px`;
+
+                // Highlight target ground hole directly under finger
+                document.querySelectorAll('.ground-hole').forEach(hole => hole.classList.remove('drag-over'));
+                const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (targetEl) {
+                    const hole = targetEl.closest('.ground-hole');
+                    if (hole) hole.classList.add('drag-over');
+                }
+            }, { passive: true });
+
+            el.addEventListener('touchend', (e) => {
+                if (!activeDragGhost) return;
+                const touch = e.changedTouches[0];
+                
+                const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+                document.querySelectorAll('.ground-hole').forEach(hole => hole.classList.remove('drag-over'));
+
+                if (activeDragGhost) {
+                    activeDragGhost.remove();
+                    activeDragGhost = null;
+                }
+                el.style.opacity = '1';
+
+                if (targetEl) {
+                    const hole = targetEl.closest('.ground-hole');
+                    if (hole && hole.dataset.targetId) {
+                        tryMatch(stick.id, hole.dataset.targetId, hole);
+                    }
+                }
+            });
+        }
+
+        function renderSlotsUI(slots) {
+            const container = document.getElementById('slots-container');
+            container.innerHTML = '';
+
+            slots.forEach(slot => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'flex flex-col items-center justify-start h-full px-2';
+
+                const el = document.createElement('div');
+                el.dataset.targetId = slot.id;
+                el.dataset.height = slot.height;
+                el.className = 'ground-hole w-12 md:w-16 flex justify-center items-end pb-1 transition-all';
+                el.style.height = `${slot.height + 12}px`; // Hole deeper than stick with ample bottom spacing
+
+                // Visual target dot at bottom
+                el.innerHTML = `<div class="w-2 h-2 rounded-full bg-amber-950 opacity-80 pointer-events-none mb-1"></div>`;
+
+                // Drag and Drop into Hole
+                el.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    el.classList.add('drag-over');
+                });
+
+                el.addEventListener('dragleave', () => {
+                    el.classList.remove('drag-over');
+                });
+
+                el.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    el.classList.remove('drag-over');
+                    const stickId = e.dataTransfer.getData('text/plain');
+                    tryMatch(stickId, slot.id, el);
+                });
+
+                // Tap to insert into Hole
+                el.addEventListener('click', () => {
+                    if (selectedStickId) {
+                        tryMatch(selectedStickId, slot.id, el);
+                    }
+                });
+
+                wrapper.appendChild(el);
+                container.appendChild(wrapper);
+            });
+        }
+
+        function selectStick(stickId) {
+            activateAudio();
+            const stickData = activeSticks.find(s => s.id === stickId);
+            if (!stickData || stickData.isMatched) return;
+
+            document.querySelectorAll('.stick').forEach(el => el.classList.remove('selected'));
+
+            if (selectedStickId === stickId) {
+                selectedStickId = null;
+            } else {
+                selectedStickId = stickId;
+                const el = document.getElementById(stickId);
+                if (el) el.classList.add('selected');
+                playSound('tap');
+            }
+        }
+
+        function tryMatch(stickId, targetSlotId, slotElement) {
+            if (isAnimating) return;
+            const stickData = activeSticks.find(s => s.id === stickId);
+            if (!stickData || stickData.isMatched) return;
+
+            if (slotElement.classList.contains('filled')) return;
+
+            const stickEl = document.getElementById(stickId);
+
+            if (stickId === targetSlotId) {
+                // MATCHED! Stick fits hole depth perfectly
+                stickData.isMatched = true;
+                matchedCount++;
+
+                // Hide top stick element
+                if (stickEl) {
+                    stickEl.parentElement.style.visibility = 'hidden';
+                }
+
+                // Fill ground hole with embedded stick
+                slotElement.classList.add('filled');
+                slotElement.style.boxShadow = 'none';
+                slotElement.innerHTML = `
+                    <div class="stick-inserted w-10 md:w-14 rounded-2xl ${stickData.color.bg} border-4 ${stickData.color.border} shadow-inner" style="height: ${stickData.height}px;"></div>
+                `;
+
+                playSound('thud');
+                
+                // Voice Speech feedback ("ながーい" / "みじかーい")
+                setTimeout(() => {
+                    speakText(stickData.voice);
+                }, 150);
+
+                selectedStickId = null;
+
+                // Check if all holes are filled
+                if (matchedCount === activeSticks.length) {
+                    setTimeout(() => {
+                        onQuestionComplete();
+                    }, 600);
+                }
+
+            } else {
+                // MISMATCH! (Stick sticks out or sinks down in wrong hole without moving hole)
+                isAnimating = true;
+                playSound('error');
+
+                if (stickEl) {
+                    stickEl.parentElement.style.visibility = 'hidden';
+                }
+
+                // Create temporary stick in hole touching bottom without hole moving
+                const tempStick = document.createElement('div');
+                tempStick.className = `stick-inserted w-10 md:w-14 rounded-2xl ${stickData.color.bg} border-4 ${stickData.color.border} opacity-90 transition-all z-30`;
+                tempStick.style.height = `${stickData.height}px`;
+                tempStick.style.position = 'absolute';
+                tempStick.style.bottom = '4px';
+
+                slotElement.appendChild(tempStick);
+
+                // Reset stick back to sky selection
+                setTimeout(() => {
+                    if (slotElement.contains(tempStick)) {
+                        slotElement.removeChild(tempStick);
+                    }
+                    if (stickEl) {
+                        stickEl.parentElement.style.visibility = 'visible';
+                    }
+                    selectedStickId = null;
+                    document.querySelectorAll('.stick').forEach(el => el.classList.remove('selected'));
+                    isAnimating = false;
+                }, 1300);
+            }
+        }
+
+        function onQuestionComplete() {
+            playSound('correct');
+
+            // Show "たいへんよくできました" overlay
+            const overlay = document.getElementById('question-clear-overlay');
+            if (overlay) {
+                overlay.classList.remove('hidden');
+            }
+
+            // Automatically transition to next question after 1.4 seconds
+            setTimeout(() => {
+                if (overlay) {
+                    overlay.classList.add('hidden');
+                }
+                nextQuestion();
+            }, 1400);
+        }
+
+        function nextQuestion() {
+            if (currentQuestion < totalQuestions) {
+                currentQuestion++;
+                loadQuestion();
+            } else {
+                showClearModal();
+            }
+        }
+
+        function showClearModal() {
+            playSound('fanfare');
+            document.getElementById('clear-modal').classList.remove('hidden');
+            startConfetti();
+        }
+
+        let confettiInterval = null;
+        function startConfetti() {
+            const canvas = document.getElementById('confetti-canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            const particles = [];
+            const colors = ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+
+            for (let i = 0; i < 90; i++) {
+                particles.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height - canvas.height,
+                    size: Math.random() * 10 + 6,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    vx: Math.random() * 4 - 2,
+                    vy: Math.random() * 3 + 3,
+                    angle: Math.random() * 360
+                });
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                particles.forEach(p => {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.angle += 2;
+
+                    if (p.y > canvas.height) {
+                        p.y = -10;
+                        p.x = Math.random() * canvas.width;
+                    }
+
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate((p.angle * Math.PI) / 180);
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+                    ctx.restore();
+                });
+            }
+
+            confettiInterval = setInterval(draw, 20);
+        }
+
+        function stopConfetti() {
+            if (confettiInterval) {
+                clearInterval(confettiInterval);
+                confettiInterval = null;
+            }
+            const canvas = document.getElementById('confetti-canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    </script>
+</body>
+</html>
